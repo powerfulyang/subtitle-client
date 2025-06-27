@@ -1,0 +1,198 @@
+@import "tailwindcss";
+
+:root {
+  --background: #0f172a;
+  --foreground: #f1f5f9;
+  --card: #1e293b;
+  --card-foreground: #f1f5f9;
+  --primary: #3b82f6;
+  --primary-foreground: #ffffff;
+  --secondary: #64748b;
+  --secondary-foreground: #f1f5f9;
+  --accent: #10b981;
+  --accent-foreground: #ffffff;
+  --destructive: #ef4444;
+  --destructive-foreground: #ffffff;
+  --border: #334155;
+  --input: #1e293b;
+  --ring: #3b82f6;
+}
+
+* {
+  border-color: hsl(var(--border));
+}
+
+body {
+  color: var(--foreground);
+  background: var(--background);
+  font-feature-settings: "rlig" 1, "calt" 1;
+}
+
+/* 自定义滚动条样式 */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: rgba(30, 41, 59, 0.5);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: linear-gradient(135deg, #3b82f6, #8b5cf6);
+  border-radius: 4px;
+  transition: all 0.3s ease;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: linear-gradient(135deg, #2563eb, #7c3aed);
+}
+
+::-webkit-scrollbar-corner {
+  background: rgba(30, 41, 59, 0.5);
+}
+
+/* Firefox 滚动条样式 */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: #3b82f6 rgba(30, 41, 59, 0.5);
+}
+
+@layer components {
+  .glass-card {
+    @apply rounded-xl shadow-2xl;
+    background: rgba(30, 41, 59, 0.8);
+    backdrop-filter: blur(16px);
+  }
+  
+  .gradient-border {
+    @apply relative p-0.5 bg-gradient-to-r from-blue-500 via-purple-500 to-pink-500 rounded-xl;
+  }
+  
+  .gradient-border::before {
+    content: '';
+    @apply absolute inset-0 bg-gradient-to-r from-blue-500 via-purple-500 to-pink-500 rounded-xl blur-sm opacity-75;
+    z-index: -1;
+  }
+  
+  .btn-primary {
+    @apply bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 text-white font-semibold py-3 px-6 rounded-lg transition-all duration-200 transform hover:scale-105 shadow-lg hover:shadow-xl;
+  }
+  
+  .btn-secondary {
+    @apply bg-gray-700 hover:bg-gray-600 text-white font-semibold py-3 px-6 rounded-lg transition-all duration-200 border border-gray-600 hover:border-gray-500;
+  }
+  
+  .subtitle-item {
+    @apply bg-gray-800/60 hover:bg-gray-700/60 rounded-lg p-4 transition-all duration-200 cursor-pointer;
+    backdrop-filter: blur(8px);
+  }
+  
+  .subtitle-item:hover {
+    @apply shadow-lg;
+  }
+
+  .subtitle-item.active {
+    @apply bg-blue-500/20;
+  }
+
+  .subtitle-textarea {
+    @apply w-full bg-gray-900/70 text-white resize-none rounded-md p-3 transition-all duration-200 placeholder-gray-400 min-h-[80px] leading-relaxed outline-none;
+    backdrop-filter: blur(4px);
+  }
+
+  .subtitle-textarea:focus {
+    @apply shadow-lg;
+    box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.4);
+  }
+
+  .subtitle-textarea:hover {
+    @apply shadow-md;
+  }
+
+  /* 自定义滑块样式 */
+  .slider {
+    background: linear-gradient(to right, #3b82f6, #8b5cf6);
+  }
+  
+  .slider::-webkit-slider-thumb {
+    appearance: none;
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    background: #ffffff;
+    cursor: pointer;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+    transition: all 0.2s ease;
+  }
+
+  .slider::-webkit-slider-thumb:hover {
+    transform: scale(1.1);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+  }
+  
+  .slider::-moz-range-thumb {
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    background: #ffffff;
+    cursor: pointer;
+    border: none;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+    transition: all 0.2s ease;
+  }
+
+  .slider::-moz-range-thumb:hover {
+    transform: scale(1.1);
+  }
+
+  /* 字幕显示样式 - 增加宽度 */
+  .video-subtitle {
+    @apply absolute bottom-16 left-1/2 transform -translate-x-1/2 bg-black/80 text-white px-6 py-3 rounded-lg text-lg font-medium text-center;
+    backdrop-filter: blur(4px);
+    text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.8);
+    line-height: 1.4;
+    max-width: 90%;
+    min-width: 300px;
+  }
+
+  /* 滚动容器优化 */
+  .scroll-container {
+    @apply overflow-y-auto;
+    scroll-behavior: smooth;
+  }
+
+  .scroll-container::-webkit-scrollbar {
+    width: 6px;
+  }
+
+  .scroll-container::-webkit-scrollbar-track {
+    background: rgba(30, 41, 59, 0.3);
+    border-radius: 3px;
+  }
+
+  .scroll-container::-webkit-scrollbar-thumb {
+    background: linear-gradient(135deg, #3b82f6, #8b5cf6);
+    border-radius: 3px;
+  }
+
+  /* 字幕编辑区域容器 */
+  .subtitle-editor-container {
+    scroll-behavior: smooth;
+  }
+
+  .subtitle-editor-container::-webkit-scrollbar {
+    width: 6px;
+  }
+
+  .subtitle-editor-container::-webkit-scrollbar-track {
+    background: rgba(30, 41, 59, 0.3);
+    border-radius: 3px;
+  }
+
+  .subtitle-editor-container::-webkit-scrollbar-thumb {
+    background: linear-gradient(135deg, #3b82f6, #8b5cf6);
+    border-radius: 3px;
+  }
+} 
