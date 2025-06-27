@@ -1,0 +1,37 @@
+{
+  "name": "subtitle-client",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "next lint"
+  },
+  "dependencies": {
+    "@ffmpeg/core-mt": "^0.12.10",
+    "@ffmpeg/ffmpeg": "^0.12.15",
+    "@ffmpeg/util": "^0.12.2",
+    "clsx": "^2.1.1",
+    "framer-motion": "^12.19.1",
+    "ky": "^1.8.1",
+    "lucide-react": "^0.523.0",
+    "next": "^15",
+    "react": "^19",
+    "react-dom": "^19",
+    "react-toastify": "^11.0.5",
+    "undici": "^7.11.0"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "^4.1.10",
+    "@types/node": "^20",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "autoprefixer": "^10.4.21",
+    "code-inspector-plugin": "^0.20.12",
+    "copy-webpack-plugin": "^13.0.0",
+    "postcss": "^8.5.6",
+    "tailwindcss": "^4",
+    "typescript": "^5"
+  }
+}
