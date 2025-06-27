@@ -1,6 +1,7 @@
 
 import CopyPlugin from 'copy-webpack-plugin';
 import { fileURLToPath } from 'url';
+import { codeInspectorPlugin } from 'code-inspector-plugin'
 import path from 'path';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -8,14 +9,9 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   output: 'standalone',
-  webpack: (config, { isServer }) => {
-    // Prevent errors from specific packages
-    if (!isServer) {
-      config.resolve.fallback = {
-        fs: false,
-        net: false,
-        tls: false,
-      };
+  webpack: (config, { dev }) => {
+    if (dev) {
+      config.plugins.push(codeInspectorPlugin({ bundler: 'webpack' }))
     }
 
     // Copy FFmpeg files
