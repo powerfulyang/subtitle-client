@@ -49,47 +49,98 @@ const VideoPlayer = forwardRef<VideoPlayerRef, VideoPlayerProps>(({
     }
   }));
 
-  // Initialize jassub when video is ready
+  // Initialize jassub only when there's ASS content
   useEffect(() => {
     const video = videoRef.current;
     if (!video) return;
 
-    // Wait for video metadata to be loaded before initializing jassub
+    // Track if this effect has been cancelled
+    let cancelled = false;
+
+    // Always destroy existing instance first when dependencies change
+    if (jassubRef.current) {
+      console.log('[JASSUB] Destroying existing instance before re-initialization');
+      jassubRef.current.destroy();
+      jassubRef.current = null;
+    }
+
+    // No subtitles - just return after destroying
+    if (subtitles.length === 0) {
+      console.log('[JASSUB] No subtitles, skipping initialization');
+      return;
+    }
+
+    // Generate ASS content
+    const assContent = generateAss(subtitles, styles);
+
+    // Initialize jassub with ASS content and optional custom font
     const initJassub = async () => {
+      // Check if effect was cancelled before async operations complete
+      if (cancelled) {
+        console.log('[JASSUB] Initialization cancelled');
+        return;
+      }
+
+      // Double-check and destroy any existing instance
       if (jassubRef.current) {
         jassubRef.current.destroy();
+        jassubRef.current = null;
       }
 
       try {
         // Dynamically import jassub only on client-side
         const { default: JASSUB } = await import('jassub');
 
-        console.log('[JASSUB] Initializing with paths:', {
-          workerUrl: '/jassub/jassub-worker.js',
-          wasmUrl: '/jassub/jassub-worker.wasm',
-          legacyWasmUrl: '/jassub/jassub-worker.wasm.js',
-          modernWasmUrl: '/jassub/jassub-worker-modern.wasm'
-        });
+        // Check again after async import
+        if (cancelled) {
+          console.log('[JASSUB] Initialization cancelled after import');
+          return;
+        }
 
-        jassubRef.current = new JASSUB({
+        // Prepare JASSUB options
+        const jassubOptions: any = {
           video,
+          subContent: assContent,
           workerUrl: '/jassub/jassub-worker.js',
           wasmUrl: '/jassub/jassub-worker.wasm',
           legacyWasmUrl: '/jassub/jassub-worker.wasm.js',
           modernWasmUrl: '/jassub/jassub-worker-modern.wasm',
-          // Performance options
-          prescaleFactor: 1.0,
-          targetFps: 24,
-          maxRenderHeight: 1080,
-          // Font options
-          useLocalFonts: false,
-          availableFonts: {
-            'liberation sans': '/jassub/default.woff2'
-          },
-          fallbackFont: 'liberation sans'
-        });
+          fonts: ['/jassub/youshe.ttf']
+        };
 
-        console.log('[JASSUB] Initialized successfully');
+        // If custom font is provided, add it to availableFonts
+        if (customFont) {
+          const arrayBuffer = await customFont.blob.arrayBuffer();
+          
+          // Check again after async font reading
+          if (cancelled) {
+            console.log('[JASSUB] Initialization cancelled after font read');
+            return;
+          }
+
+          const uint8Array = new Uint8Array(arrayBuffer);
+          
+          jassubOptions.fallbackFont = customFont.name;
+          jassubOptions.useLocalFonts = false;
+          jassubOptions.availableFonts = {
+            [customFont.name.toLowerCase()]: uint8Array
+          };
+
+          console.log('[JASSUB] Initializing with custom font:', {
+            fontName: customFont.name,
+            subtitleCount: subtitles.length
+          });
+        } else {
+          console.log('[JASSUB] Initializing with ASS content:', {
+            subtitleCount: subtitles.length,
+            assLength: assContent.length,
+            assPreview: assContent.substring(0, 500)
+          });
+        }
+
+        jassubRef.current = new JASSUB(jassubOptions);
+
+        console.log('[JASSUB] Initialized successfully with subtitles');
       } catch (err) {
         console.error('[JASSUB] Failed to initialize:', err);
       }
@@ -103,53 +154,17 @@ const VideoPlayer = forwardRef<VideoPlayerRef, VideoPlayerProps>(({
     }
 
     return () => {
+      cancelled = true;
+      // Remove event listener in case it hasn't fired yet
+      video.removeEventListener('loadedmetadata', initJassub);
+      
       if (jassubRef.current) {
+        console.log('[JASSUB] Cleanup: destroying instance');
         jassubRef.current.destroy();
         jassubRef.current = null;
       }
     };
-  }, [videoUrl, customFont]);
-
-  // Update subtitles when they change
-  useEffect(() => {
-    if (!jassubRef.current) return;
-
-    if (subtitles.length === 0) {
-      // Clear subtitles
-      console.log('[JASSUB] Clearing subtitles');
-      jassubRef.current.freeTrack();
-    } else {
-      // Convert SRT subtitles to ASS format and set them
-      const assContent = generateAss(subtitles, styles);
-      console.log('[JASSUB] Setting track with ASS content:', {
-        subtitleCount: subtitles.length,
-        assLength: assContent.length,
-        assPreview: assContent.substring(0, 500)
-      });
-
-      try {
-        jassubRef.current.setTrack(assContent);
-        console.log('[JASSUB] Track set successfully');
-      } catch (err) {
-        console.error('[JASSUB] Failed to set track:', err);
-      }
-    }
-  }, [subtitles, styles]);
-
-  // Handle custom font loading
-  useEffect(() => {
-    if (!customFont || !jassubRef.current) return;
-
-    // Convert Blob to Uint8Array and add font to jassub
-    const reader = new FileReader();
-    reader.onload = () => {
-      if (reader.result && jassubRef.current) {
-        const uint8Array = new Uint8Array(reader.result as ArrayBuffer);
-        jassubRef.current.addFont(uint8Array);
-      }
-    };
-    reader.readAsArrayBuffer(customFont.blob);
-  }, [customFont]);
+  }, [videoUrl, subtitles, styles, customFont]);
 
   // Handle time updates for parent component
   useEffect(() => {

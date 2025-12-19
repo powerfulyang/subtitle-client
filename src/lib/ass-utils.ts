@@ -49,13 +49,13 @@ function toAssTime(srtTime: string): string {
 }
 
 export const DEFAULT_ASS_STYLES: AssStyles = {
-  fontSize: 24, // Reduced from 60 for better default scaling on typical web players
+  fontSize: 54, // Reduced from 60 for better default scaling on typical web players
   primaryColor: '#FFFFFF',
   outlineColor: '#000000',
   backgroundColor: '#000000',
   alignment: 2, // Bottom Center
   marginV: 30,
-  fontName: 'Roboto'
+  fontName: 'YOUSHEhaoshenti'
 };
 
 /**

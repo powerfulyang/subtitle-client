@@ -1,6 +1,5 @@
 import { FFmpeg } from '@ffmpeg/ffmpeg';
 import { fetchFile, toBlobURL } from '@ffmpeg/util';
-import { AssStyles, toAssColor } from './ass-utils';
 
 let ffmpeg: FFmpeg | null;
 
@@ -31,60 +30,48 @@ export async function getFFmpeg() {
 
 export async function burnSubtitles(
   videoFile: File,
-  srtContent: string,
+  assContent: string,
   onProgress?: (progress: number) => void,
-  customFont?: { blob: Blob; name: string; fileName: string },
-  styles?: AssStyles
+  customFont?: { blob: Blob; name: string; fileName: string }
 ) {
   const ffmpeg = await getFFmpeg();
 
-  // Progress handling
+  // Progress handling - clamp to 0-100 and filter invalid values
   const progressHandler = ({ progress }: { progress: number }) => {
-    if (onProgress) onProgress(Math.round(progress * 100));
+    if (onProgress && !isNaN(progress) && progress >= 0) {
+      const percent = Math.min(100, Math.max(0, Math.round(progress * 100)));
+      onProgress(percent);
+    }
   };
   ffmpeg.on('progress', progressHandler);
 
   try {
     const inputName = 'input.mp4';
     const outputName = 'output.mp4';
-    const subName = 'subtitles.srt';
+    const subName = 'subtitles.ass';
     // Use custom font filename or default
-    const fontFileName = customFont ? customFont.fileName : 'Roboto-Regular.ttf';
-    
-    // Construct force_style string
-    const styleParts = [];
-    if (styles) {
-        styleParts.push(`FontName=${styles.fontName}`);
-        styleParts.push(`FontSize=${styles.fontSize}`);
-        styleParts.push(`PrimaryColour=${toAssColor(styles.primaryColor)}`);
-        styleParts.push(`OutlineColour=${toAssColor(styles.outlineColor)}`);
-        styleParts.push(`Alignment=${styles.alignment}`);
-        styleParts.push(`MarginV=${styles.marginV}`);
-    } else {
-        // Fallback default
-        styleParts.push(`FontName=${customFont ? customFont.name : 'Roboto-Regular'}`);
-    }
-    const forceStyle = styleParts.join(',');
+    const fontFileName = customFont ? customFont.fileName : 'youshe.ttf';
 
-    // 1. Write video and subtitles
+    // 1. Write video and ASS subtitles
     await ffmpeg.writeFile(inputName, await fetchFile(videoFile));
-    await ffmpeg.writeFile(subName, srtContent);
+    await ffmpeg.writeFile(subName, assContent);
 
-        // 2. Write font
-        if (customFont) {
-            await ffmpeg.writeFile(fontFileName, await fetchFile(customFont.blob));
-        } else {
-            // Download default font
-            // Using a more reliable CDN for Roboto font
-            const fontUrl = 'https://raw.githubusercontent.com/google/fonts/main/apache/roboto/Roboto-Regular.ttf';
-            await ffmpeg.writeFile(fontFileName, await fetchFile(fontUrl));
-        }
-    // 3. Execute burn command
+    // 2. Write font
+    if (customFont) {
+      await ffmpeg.writeFile(fontFileName, await fetchFile(customFont.blob));
+    } else {
+      // Use default YOUSHEhaoshenti font
+      const fontUrl = '/jassub/youshe.ttf';
+      await ffmpeg.writeFile(fontFileName, await fetchFile(fontUrl));
+    }
+
+    // 3. Execute burn command - ASS already contains all styling
     await ffmpeg.exec([
       '-i', inputName,
-      '-vf', `subtitles=${subName}:fontsdir=/:force_style='${forceStyle}'`,
+      '-vf', `ass=${subName}:fontsdir=/`,
       '-c:a', 'copy', // Copy audio stream (fast)
       '-preset', 'ultrafast', // Fast encoding for WASM
+      "-threads", "4", // 必须使用，多线程的 ffmpeg wasm 有 BUG，不设置就报错
       outputName
     ]);
 

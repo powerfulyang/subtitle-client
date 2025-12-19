@@ -28,6 +28,7 @@ interface SubtitleEditorProps {
   styles?: AssStyles;
   onStylesChange?: (styles: AssStyles) => void;
   isBurning?: boolean;
+  burnProgress?: number;
   currentTime?: number;
 }
 
@@ -47,6 +48,7 @@ export default function SubtitleEditor({
   styles = DEFAULT_ASS_STYLES,
   onStylesChange,
   isBurning = false,
+  burnProgress = 0,
   currentTime = 0
 }: SubtitleEditorProps) {
   const [isExporting, setIsExporting] = useState(false);
@@ -395,15 +397,24 @@ export default function SubtitleEditor({
               onClick={onBurn}
               disabled={isBurning || subtitles.length === 0}
               className={`
-              flex-1 flex items-center justify-center gap-2 py-2.5 rounded-md font-bold text-[11px] uppercase tracking-widest transition-all border
+              flex-1 flex items-center justify-center gap-2 py-2.5 rounded-md font-bold text-[11px] uppercase tracking-widest transition-all border relative overflow-hidden
               ${subtitles.length === 0 || isBurning
                 ? 'bg-gray-50 text-gray-300 border-gray-100 cursor-not-allowed'
                 : 'bg-orange-500 text-white border-orange-600 hover:bg-orange-600 cursor-pointer'
               }
             `}
             >
-              <Flame className={`w-3.5 h-3.5 ${isBurning ? 'animate-pulse' : ''}`}/>
-              {isBurning ? 'Burning...' : 'Burn Video'}
+              {/* Progress bar background */}
+              {isBurning && burnProgress > 0 && (
+                <div 
+                  className="absolute inset-0 bg-orange-600 transition-all duration-300"
+                  style={{ width: `${burnProgress}%` }}
+                />
+              )}
+              <span className="relative z-10 flex items-center gap-2">
+                <Flame className={`w-3.5 h-3.5 ${isBurning ? 'animate-pulse' : ''}`}/>
+                {isBurning ? `Burning... ${burnProgress}%` : 'Burn Video'}
+              </span>
             </button>
           )}
           

@@ -17,7 +17,7 @@ import FileUploader from '@/components/file-uploader';
 import SubtitleEditor from '@/components/subtitle-editor';
 import {extractAudio, burnSubtitles} from '@/lib/ffmpeg';
 import {parseSrt, stringifySrt, Subtitle} from '@/lib/srt-parser';
-import {AssStyles, DEFAULT_ASS_STYLES} from '@/lib/ass-utils';
+import {AssStyles, DEFAULT_ASS_STYLES, generateAss} from '@/lib/ass-utils';
 import {toast} from 'react-toastify';
 import ky from "ky";
 import type {VideoPlayerRef} from '@/components/video-player';
@@ -34,6 +34,7 @@ export default function Home() {
   const [subtitles, setSubtitles] = useState<Subtitle[]>([]);
   const [isGenerating, setIsGenerating] = useState(false);
   const [isBurning, setIsBurning] = useState(false);
+  const [burnProgress, setBurnProgress] = useState(0);
   const [currentTime, setCurrentTime] = useState(0);
   const [enableVocalSeparation, setEnableVocalSeparation] = useState(false);
   const [selectedFont, setSelectedFont] = useState<{ blob: Blob; name: string; fileName: string } | null>(null);
@@ -90,23 +91,25 @@ export default function Home() {
     if (!videoFile || subtitles.length === 0) return;
 
     setIsBurning(true);
+    setBurnProgress(0);
     const toastId = toast.loading('Initializing burn process...');
 
     try {
-      const srtContent = stringifySrt(subtitles);
+      // Generate ASS content with current styles
+      const assContent = generateAss(subtitles, assStyles);
       
       const burnedVideoBlob = await burnSubtitles(
         videoFile, 
-        srtContent, 
+        assContent, 
         (progress) => {
+          setBurnProgress(progress);
           toast.update(toastId, { 
             render: `Burning video: ${progress}%`,
             type: "info",
             isLoading: true 
           });
         },
-        selectedFont || undefined,
-        assStyles
+        selectedFont || undefined
       );
 
       // Trigger download
@@ -127,14 +130,16 @@ export default function Home() {
       });
     } catch (error) {
       console.error('Burn failed:', error);
+      const errorMessage = error instanceof Error ? error.message : 'Failed to burn video';
       toast.update(toastId, { 
-        render: 'Failed to burn video', 
+        render: `Burn failed: ${errorMessage}`, 
         type: "error", 
         isLoading: false,
-        autoClose: 3000 
+        autoClose: 5000 
       });
     } finally {
       setIsBurning(false);
+      setBurnProgress(0);
     }
   };
 
@@ -331,6 +336,7 @@ export default function Home() {
                           onSubtitleClick={handleSubtitleClick}
                           onBurn={handleBurn}
                           isBurning={isBurning}
+                          burnProgress={burnProgress}
                           onFontSelect={setSelectedFont}
                           currentTime={currentTime}
                           styles={assStyles}
