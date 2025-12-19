@@ -1,13 +1,15 @@
 'use client';
 
 import { Subtitle } from '@/lib/srt-parser';
-import { motion } from 'framer-motion';
-import { forwardRef, useEffect, useImperativeHandle, useRef, useState, useCallback } from 'react';
+import { AssStyles, DEFAULT_ASS_STYLES, generateAss } from '@/lib/ass-utils';
+import React, { forwardRef, useEffect, useImperativeHandle, useRef } from 'react';
 
 interface VideoPlayerProps {
   videoUrl: string;
   onTimeUpdate?: (time: number) => void;
   subtitles?: Subtitle[];
+  styles?: AssStyles;
+  customFont?: { blob: Blob; name: string };
 }
 
 export interface VideoPlayerRef {
@@ -16,24 +18,18 @@ export interface VideoPlayerRef {
   pause: () => void;
 }
 
-// 将SRT时间格式转换为秒数
-const srtTimeToSeconds = (time: string): number => {
-  const [hours, minutes, seconds] = time.split(':');
-  const [secs, millis] = seconds.split(',');
-  return parseInt(hours) * 3600 + parseInt(minutes) * 60 + parseInt(secs) + parseInt(millis) / 1000;
-};
-
-const VideoPlayer = forwardRef<VideoPlayerRef, VideoPlayerProps>(({ 
-  videoUrl, 
-  onTimeUpdate, 
-  subtitles = [] 
+const VideoPlayer = forwardRef<VideoPlayerRef, VideoPlayerProps>(({
+  videoUrl,
+  onTimeUpdate,
+  subtitles = [],
+  styles = DEFAULT_ASS_STYLES,
+  customFont
 }, ref) => {
   const videoRef = useRef<HTMLVideoElement>(null);
-  const [currentTime, setCurrentTime] = useState(0);
+  const jassubRef = useRef<any>(null);
   const rafRef = useRef<number>(0);
   const lastUpdateRef = useRef<number>(0);
 
-  // 暴露给父组件的方法
   useImperativeHandle(ref, () => ({
     seekTo: (time: number) => {
       if (videoRef.current) {
@@ -53,24 +49,124 @@ const VideoPlayer = forwardRef<VideoPlayerRef, VideoPlayerProps>(({
     }
   }));
 
+  // Initialize jassub when video is ready
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video) return;
+
+    // Wait for video metadata to be loaded before initializing jassub
+    const initJassub = async () => {
+      if (jassubRef.current) {
+        jassubRef.current.destroy();
+      }
+
+      try {
+        // Dynamically import jassub only on client-side
+        const { default: JASSUB } = await import('jassub');
+
+        console.log('[JASSUB] Initializing with paths:', {
+          workerUrl: '/jassub/jassub-worker.js',
+          wasmUrl: '/jassub/jassub-worker.wasm',
+          legacyWasmUrl: '/jassub/jassub-worker.wasm.js',
+          modernWasmUrl: '/jassub/jassub-worker-modern.wasm'
+        });
+
+        jassubRef.current = new JASSUB({
+          video,
+          workerUrl: '/jassub/jassub-worker.js',
+          wasmUrl: '/jassub/jassub-worker.wasm',
+          legacyWasmUrl: '/jassub/jassub-worker.wasm.js',
+          modernWasmUrl: '/jassub/jassub-worker-modern.wasm',
+          // Performance options
+          prescaleFactor: 1.0,
+          targetFps: 24,
+          maxRenderHeight: 1080,
+          // Font options
+          useLocalFonts: false,
+          availableFonts: {
+            'liberation sans': '/jassub/default.woff2'
+          },
+          fallbackFont: 'liberation sans'
+        });
+
+        console.log('[JASSUB] Initialized successfully');
+      } catch (err) {
+        console.error('[JASSUB] Failed to initialize:', err);
+      }
+    };
+
+    if (video.readyState >= 1) {
+      // Metadata already loaded
+      initJassub();
+    } else {
+      video.addEventListener('loadedmetadata', initJassub, { once: true });
+    }
+
+    return () => {
+      if (jassubRef.current) {
+        jassubRef.current.destroy();
+        jassubRef.current = null;
+      }
+    };
+  }, [videoUrl, customFont]);
+
+  // Update subtitles when they change
+  useEffect(() => {
+    if (!jassubRef.current) return;
+
+    if (subtitles.length === 0) {
+      // Clear subtitles
+      console.log('[JASSUB] Clearing subtitles');
+      jassubRef.current.freeTrack();
+    } else {
+      // Convert SRT subtitles to ASS format and set them
+      const assContent = generateAss(subtitles, styles);
+      console.log('[JASSUB] Setting track with ASS content:', {
+        subtitleCount: subtitles.length,
+        assLength: assContent.length,
+        assPreview: assContent.substring(0, 500)
+      });
+
+      try {
+        jassubRef.current.setTrack(assContent);
+        console.log('[JASSUB] Track set successfully');
+      } catch (err) {
+        console.error('[JASSUB] Failed to set track:', err);
+      }
+    }
+  }, [subtitles, styles]);
+
+  // Handle custom font loading
+  useEffect(() => {
+    if (!customFont || !jassubRef.current) return;
+
+    // Convert Blob to Uint8Array and add font to jassub
+    const reader = new FileReader();
+    reader.onload = () => {
+      if (reader.result && jassubRef.current) {
+        const uint8Array = new Uint8Array(reader.result as ArrayBuffer);
+        jassubRef.current.addFont(uint8Array);
+      }
+    };
+    reader.readAsArrayBuffer(customFont.blob);
+  }, [customFont]);
+
+  // Handle time updates for parent component
   useEffect(() => {
     const video = videoRef.current;
     if (!video) return;
 
     const handleTimeUpdate = () => {
-      // 取消之前的 RAF
       if (rafRef.current) {
         cancelAnimationFrame(rafRef.current);
       }
 
       rafRef.current = requestAnimationFrame(() => {
-        const currentTime = video.currentTime;
-        
-        // 只在时间变化超过 0.1 秒时更新（避免过于频繁的更新）
-        if (Math.abs(currentTime - lastUpdateRef.current) > 0.1) {
-          lastUpdateRef.current = currentTime;
-          setCurrentTime(currentTime);
-          onTimeUpdate?.(currentTime);
+        const time = video.currentTime;
+        // Update roughly every frame for smooth subtitle sync
+        if (Math.abs(time - lastUpdateRef.current) > 0.05) {
+          lastUpdateRef.current = time;
+          onTimeUpdate?.(time);
         }
       });
     };
@@ -85,54 +181,16 @@ const VideoPlayer = forwardRef<VideoPlayerRef, VideoPlayerProps>(({
     };
   }, [onTimeUpdate]);
 
-  // 优化字幕查找：使用二分查找
-  const getCurrentSubtitle = useCallback((): string | null => {
-    if (subtitles.length === 0) return null;
-    
-    let left = 0;
-    let right = subtitles.length - 1;
-    
-    while (left <= right) {
-      const mid = Math.floor((left + right) / 2);
-      const startTime = srtTimeToSeconds(subtitles[mid].startTime);
-      const endTime = srtTimeToSeconds(subtitles[mid].endTime);
-      
-      if (currentTime >= startTime && currentTime <= endTime) {
-        return subtitles[mid].text;
-      } else if (currentTime < startTime) {
-        right = mid - 1;
-      } else {
-        left = mid + 1;
-      }
-    }
-    
-    return null;
-  }, [currentTime, subtitles]);
-
-  const currentSubtitle = getCurrentSubtitle();
-
   return (
-    <div className="relative bg-black rounded-lg overflow-hidden">
-      <video
-        ref={videoRef}
-        src={videoUrl}
-        controls
-        className="w-full h-auto"
-      />
-
-      {/* 字幕显示 */}
-      {currentSubtitle && (
-        <motion.div
-          key={currentSubtitle}
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          exit={{ opacity: 0, y: 20 }}
-          transition={{ duration: 0.3 }}
-          className="absolute max-w-full w-max bottom-16 left-1/2 transform -translate-x-1/2 bg-black/80 text-white px-4 py-2 rounded-lg text-center backdrop-blur-sm"
-        >
-          {currentSubtitle}
-        </motion.div>
-      )}
+    <div className="relative w-full flex items-center justify-center bg-transparent group">
+      <div className="w-full aspect-video">
+        <video
+          ref={videoRef}
+          src={videoUrl}
+          controls
+          className="h-full w-full"
+        />
+      </div>
     </div>
   );
 });

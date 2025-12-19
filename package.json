@@ -14,6 +14,7 @@
     "@ffmpeg/util": "^0.12.2",
     "clsx": "^2.1.1",
     "framer-motion": "^12.19.1",
+    "jassub": "^1.8.6",
     "ky": "^1.8.1",
     "lucide-react": "^0.523.0",
     "next": "^15",

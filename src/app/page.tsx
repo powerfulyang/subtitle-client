@@ -5,48 +5,64 @@ import {motion, AnimatePresence} from 'framer-motion';
 import {
   Video,
   Upload,
-  Zap,
   CheckCircle,
   FileVideo,
   Wand2,
   Edit3,
-  Play,
   Loader2,
   Music
 } from 'lucide-react';
+import dynamic from 'next/dynamic';
 import FileUploader from '@/components/file-uploader';
-import VideoPlayer, {VideoPlayerRef} from '@/components/video-player';
 import SubtitleEditor from '@/components/subtitle-editor';
-import {extractAudio} from '@/lib/ffmpeg';
-import {parseSrt, Subtitle} from '@/lib/srt-parser';
+import {extractAudio, burnSubtitles} from '@/lib/ffmpeg';
+import {parseSrt, stringifySrt, Subtitle} from '@/lib/srt-parser';
+import {AssStyles, DEFAULT_ASS_STYLES} from '@/lib/ass-utils';
 import {toast} from 'react-toastify';
 import ky from "ky";
-import {BACKUP_TRANSCRIBE_API_URL} from "@/constants";
+import type {VideoPlayerRef} from '@/components/video-player';
+
+// Dynamically import VideoPlayer with SSR disabled
+const VideoPlayer = dynamic(() => import('@/components/video-player'), {
+  ssr: false,
+  loading: () => <div className="w-full aspect-video bg-gray-100 animate-pulse" />
+});
 
 export default function Home() {
   const [videoUrl, setVideoUrl] = useState('');
+  const [videoFile, setVideoFile] = useState<File | null>(null);
   const [subtitles, setSubtitles] = useState<Subtitle[]>([]);
   const [isGenerating, setIsGenerating] = useState(false);
+  const [isBurning, setIsBurning] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [enableVocalSeparation, setEnableVocalSeparation] = useState(false);
+  const [selectedFont, setSelectedFont] = useState<{ blob: Blob; name: string; fileName: string } | null>(null);
+  const [assStyles, setAssStyles] = useState<AssStyles>(DEFAULT_ASS_STYLES);
+  
   const videoRef = useRef<VideoPlayerRef>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const handleFileSelect = (file: File) => {
     if (videoUrl) {
       URL.revokeObjectURL(videoUrl);
-      // 清空字幕
       setSubtitles([]);
       setCurrentTime(0);
     }
     const url = URL.createObjectURL(file);
     setVideoUrl(url);
+    setVideoFile(file);
   };
 
-  const handleGenerateSubtitles = async (file: File) => {
+  const handleTriggerUpload = () => {
+    fileInputRef.current?.click();
+  };
+
+  const handleGenerateSubtitles = async () => {
+    if (!videoFile) return;
+    
     setIsGenerating(true);
     try {
-      const audioBlob = await extractAudio(file);
-      console.log(`文件大小, ${(audioBlob.size / 1000 / 1000).toFixed(2)}MB`)
+      const audioBlob = await extractAudio(videoFile);
       const formData = new FormData();
       formData.append('file', audioBlob, 'audio.mp3');
       formData.append('enable_vocal_separation', enableVocalSeparation.toString());
@@ -58,24 +74,67 @@ export default function Home() {
         throwHttpErrors: false
       });
 
-      if (!response.ok) {
-        toast.warn('GPU 服务器暂时不可用，回退到 CPU 服务器，速度可能很慢')
-        response = await ky<any>(BACKUP_TRANSCRIBE_API_URL, {
-          method: 'POST',
-          body: formData,
-          timeout: false
-        })
-      }
-
       const data = await response.json();
       const parsedSubtitles = parseSrt(data.srt_content);
       setSubtitles(parsedSubtitles);
-      toast.success('字幕生成成功');
+      toast.success('Subtitles generated successfully');
     } catch (error) {
-      console.error('字幕生成失败:', error);
-      toast.error('字幕生成失败');
+      console.error('Failed to generate subtitles:', error);
+      toast.error('Failed to generate subtitles');
     } finally {
       setIsGenerating(false);
+    }
+  };
+
+  const handleBurn = async () => {
+    if (!videoFile || subtitles.length === 0) return;
+
+    setIsBurning(true);
+    const toastId = toast.loading('Initializing burn process...');
+
+    try {
+      const srtContent = stringifySrt(subtitles);
+      
+      const burnedVideoBlob = await burnSubtitles(
+        videoFile, 
+        srtContent, 
+        (progress) => {
+          toast.update(toastId, { 
+            render: `Burning video: ${progress}%`,
+            type: "info",
+            isLoading: true 
+          });
+        },
+        selectedFont || undefined,
+        assStyles
+      );
+
+      // Trigger download
+      const url = URL.createObjectURL(burnedVideoBlob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `subtitled_${videoFile.name}`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+
+      toast.update(toastId, { 
+        render: 'Video burned successfully!', 
+        type: "success", 
+        isLoading: false,
+        autoClose: 3000
+      });
+    } catch (error) {
+      console.error('Burn failed:', error);
+      toast.update(toastId, { 
+        render: 'Failed to burn video', 
+        type: "error", 
+        isLoading: false,
+        autoClose: 3000 
+      });
+    } finally {
+      setIsBurning(false);
     }
   };
 
@@ -101,333 +160,189 @@ export default function Home() {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-900 via-gray-900 to-slate-800">
-      {/* 装饰性背景元素 */}
-      <div className="absolute inset-0 overflow-hidden pointer-events-none">
-        <motion.div
-          className="absolute top-1/4 left-1/4 w-96 h-96 bg-blue-500/10 rounded-full blur-3xl"
-          animate={{
-            scale: [1, 1.2, 1],
-            opacity: [0.3, 0.5, 0.3],
-          }}
-          transition={{
-            duration: 4,
-            repeat: Infinity,
-            ease: "easeInOut"
-          }}
-        />
-        <motion.div
-          className="absolute bottom-1/4 right-1/4 w-96 h-96 bg-purple-500/10 rounded-full blur-3xl"
-          animate={{
-            scale: [1.2, 1, 1.2],
-            opacity: [0.5, 0.3, 0.5],
-          }}
-          transition={{
-            duration: 4,
-            repeat: Infinity,
-            ease: "easeInOut",
-            delay: 2
-          }}
-        />
-      </div>
+    <div className="min-h-screen bg-gray-50 text-gray-900 overflow-hidden flex flex-col">
+      {/* Hidden Global Input */}
+      <input 
+        type="file" 
+        ref={fileInputRef} 
+        onChange={(e) => e.target.files?.[0] && handleFileSelect(e.target.files[0])}
+        accept="video/*,audio/*" 
+        className="hidden" 
+      />
 
-      {/* 头部 */}
-      <motion.header
-        className="relative z-10 flex justify-between items-center p-6 bg-gray-900/50"
-        style={{backdropFilter: 'blur(4px)'}}
-        initial={{y: -100, opacity: 0}}
-        animate={{y: 0, opacity: 1}}
-        transition={{duration: 0.5}}
-      >
-        <div className="flex items-center space-x-4">
-          <motion.div
-            className="w-10 h-10 bg-gradient-to-br from-blue-500 to-purple-600 rounded-lg flex items-center justify-center"
-            whileHover={{scale: 1.1, rotate: 10}}
-            whileTap={{scale: 0.9}}
-          >
-            <FileVideo className="w-6 h-6 text-white"/>
-          </motion.div>
-          <div>
-            <h1
-              className="text-3xl font-bold bg-gradient-to-r from-blue-400 to-purple-400 bg-clip-text text-transparent">
-              AI字幕编辑器
+      {/* Header */}
+      <header className="sticky top-0 z-50 bg-white border-b border-gray-200 shrink-0">
+        <div className="mx-auto px-4 h-14 flex items-center justify-between">
+          <div className="flex items-center space-x-3">
+            <div className="w-7 h-7 bg-black rounded-md flex items-center justify-center">
+              <FileVideo className="w-4 h-4 text-white"/>
+            </div>
+            <h1 className="text-lg font-bold text-gray-900 tracking-tight">
+              Subtitle AI
             </h1>
-            <p className="text-gray-400 text-sm">智能语音识别 · 实时编辑 · 专业工具</p>
+          </div>
+          <div className="flex items-center space-x-6">
+            <div className="hidden sm:flex text-xs text-gray-500 items-center space-x-2">
+              <Upload className="w-3.5 h-3.5"/>
+              <span>MP4, AVI, MOV</span>
+            </div>
+            <FileUploader onFileSelect={handleFileSelect}/>
           </div>
         </div>
-        <div className="flex items-center space-x-4">
-          <FileUploader onFileSelect={handleFileSelect}/>
-          <div className="text-sm text-gray-400 flex items-center space-x-2">
-            <Upload className="w-4 h-4"/>
-            <span>支持 MP4, AVI, MOV 等格式</span>
-          </div>
-        </div>
-      </motion.header>
+      </header>
 
-      {/* 主内容区域 */}
-      <main className="relative z-10 p-6">
-        <div className="max-w-7xl mx-auto">
-          <AnimatePresence mode="wait">
-            {!videoUrl ? (
-              // 欢迎界面
-              <motion.div
-                key="welcome"
-                className="text-center py-20"
-                initial={{opacity: 0, y: 20}}
-                animate={{opacity: 1, y: 0}}
-                exit={{opacity: 0, y: -20}}
-                transition={{duration: 0.6}}
-              >
-                <div className="glass-card max-w-2xl mx-auto p-12">
-                  <motion.div
-                    className="w-24 h-24 bg-gradient-to-br from-blue-500 to-purple-600 rounded-full mx-auto mb-8 flex items-center justify-center"
-                    animate={{
-                      y: [0, -10, 0],
-                    }}
-                    transition={{
-                      duration: 2,
-                      repeat: Infinity,
-                      ease: "easeInOut"
-                    }}
-                  >
-                    <Video className="w-12 h-12 text-white"/>
-                  </motion.div>
-                  <motion.h2
-                    className="text-4xl font-bold text-white mb-4"
-                    initial={{opacity: 0, y: 20}}
-                    animate={{opacity: 1, y: 0}}
-                    transition={{delay: 0.2}}
-                  >
-                    开始您的字幕创作之旅
-                  </motion.h2>
-                  <motion.p
-                    className="text-xl text-gray-300 mb-8"
-                    initial={{opacity: 0, y: 20}}
-                    animate={{opacity: 1, y: 0}}
-                    transition={{delay: 0.3}}
-                  >
-                    上传视频文件，AI将自动为您生成准确的字幕，您可以实时编辑和调整
-                  </motion.p>
-                  <motion.div
-                    className="flex flex-col sm:flex-row gap-4 justify-center items-center"
-                    initial={{opacity: 0, y: 20}}
-                    animate={{opacity: 1, y: 0}}
-                    transition={{delay: 0.4}}
-                  >
-                    <motion.div
-                      className="flex items-center space-x-2 text-green-400"
-                      whileHover={{scale: 1.05}}
-                    >
-                      <CheckCircle className="w-5 h-5"/>
-                      <span>AI语音识别</span>
-                    </motion.div>
-                    <motion.div
-                      className="flex items-center space-x-2 text-green-400"
-                      whileHover={{scale: 1.05}}
-                    >
-                      <CheckCircle className="w-5 h-5"/>
-                      <span>实时编辑</span>
-                    </motion.div>
-                    <motion.div
-                      className="flex items-center space-x-2 text-green-400"
-                      whileHover={{scale: 1.05}}
-                    >
-                      <CheckCircle className="w-5 h-5"/>
-                      <span>多格式支持</span>
-                    </motion.div>
-                  </motion.div>
+      {/* Main Content */}
+      <main className="p-4 mx-auto w-full flex-1 flex flex-col justify-center overflow-hidden">
+        <AnimatePresence mode="wait">
+          {!videoUrl ? (
+            // Welcome Screen
+            <motion.div
+              key="welcome"
+              className="flex flex-col items-center justify-center py-12"
+              initial={{opacity: 0, y: 5}}
+              animate={{opacity: 1, y: 0}}
+              exit={{opacity: 0, y: -5}}
+              transition={{duration: 0.3}}
+            >
+              <div className="bg-white p-12 rounded-md border border-gray-200 max-w-2xl text-center shadow-sm">
+                <div className="w-14 h-14 bg-gray-50 text-gray-900 rounded-md mx-auto mb-6 flex items-center justify-center border border-gray-100">
+                  <Video className="w-7 h-7"/>
                 </div>
-              </motion.div>
-            ) : (
-              // 工作界面
-              <motion.div
-                key="workspace"
-                className="grid grid-cols-1 xl:grid-cols-3 gap-6"
-                initial={{opacity: 0, scale: 0.95}}
-                animate={{opacity: 1, scale: 1}}
-                exit={{opacity: 0, scale: 0.95}}
-                transition={{duration: 0.5}}
-              >
-                {/* 视频播放器区域 */}
-                <motion.div
-                  className="xl:col-span-2"
-                  initial={{x: -50, opacity: 0}}
-                  animate={{x: 0, opacity: 1}}
-                  transition={{delay: 0.1}}
-                >
-                  <div className="glass-card p-6">
-                    <div className="flex justify-between items-center mb-6">
-                      <h2 className="text-2xl font-bold text-white flex items-center space-x-3">
-                        <span>视频播放器</span>
-                      </h2>
-                      {videoUrl && (
-                        <div className="flex items-center space-x-4">
-                          {/* 人声分离开关 */}
-                          <motion.div
-                            className="flex items-center space-x-3 text-sm"
-                            initial={{opacity: 0, x: 20}}
-                            animate={{opacity: 1, x: 0}}
-                            transition={{delay: 0.1}}
-                          >
-                            <div className="flex items-center space-x-2 text-gray-300">
-                              <Music className="w-4 h-4"/>
-                              <span>人声分离</span>
-                            </div>
-                            <motion.label
-                              className="relative inline-flex items-center cursor-pointer"
-                              whileHover={{scale: 1.05}}
-                              whileTap={{scale: 0.95}}
-                            >
-                              <input
-                                type="checkbox"
-                                checked={enableVocalSeparation}
-                                onChange={(e) => setEnableVocalSeparation(e.target.checked)}
-                                className="sr-only peer"
-                                disabled={isGenerating}
-                              />
-                              <div
-                                className={`relative w-11 h-6 bg-gray-600 peer-focus:outline-none rounded-full peer transition-all duration-200 ${
-                                  enableVocalSeparation
-                                    ? 'peer-checked:bg-gradient-to-r peer-checked:from-blue-500 peer-checked:to-purple-500'
-                                    : ''
-                                } ${isGenerating ? 'opacity-50 cursor-not-allowed' : ''}`}>
-                                <motion.div
-                                  className="absolute top-[2px] left-[2px] bg-white rounded-full h-5 w-5 transition-all duration-200 shadow-lg"
-                                  animate={{
-                                    x: enableVocalSeparation ? 20 : 0,
-                                  }}
-                                  transition={{type: "spring", stiffness: 300, damping: 30}}
-                                />
-                              </div>
-                            </motion.label>
-                            <div className="text-xs text-gray-400">
-                              {enableVocalSeparation ? '开启' : '关闭'}
-                            </div>
-                          </motion.div>
+                <h2 className="text-2xl font-bold text-gray-900 mb-3">
+                  Video Subtitle Generator
+                </h2>
+                <p className="text-base text-gray-600 mb-8 max-w-lg mx-auto leading-relaxed">
+                  Upload your video, let AI transcribe the audio, and edit subtitles in real-time. Fast, private, and simple.
+                </p>
+                
+                <div className="mb-8">
+                  <button 
+                    onClick={handleTriggerUpload}
+                    className="btn-primary text-sm py-3 px-8 shadow-sm hover:shadow-md transition-all transform hover:-translate-y-0.5 cursor-pointer"
+                  >
+                    Start Project
+                  </button>
+                </div>
 
-                          {/* AI生成字幕按钮 */}
-                          <motion.button
-                            onClick={() => {
-                              fetch(videoUrl)
-                                .then(res => res.blob())
-                                .then(blob => new File([blob], "video.mp4", {type: blob.type}))
-                                .then(file => handleGenerateSubtitles(file));
-                            }}
-                            disabled={isGenerating}
-                            className={`flex items-center space-x-2 px-4 py-2 rounded-lg transition-all duration-200 cursor-pointer ${
-                              isGenerating
-                                ? 'bg-gray-600 cursor-not-allowed opacity-50'
-                                : 'bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 transform hover:scale-105'
-                            } text-white font-semibold shadow-lg`}
-                            whileHover={!isGenerating ? {scale: 1.05} : {}}
-                            whileTap={!isGenerating ? {scale: 0.95} : {}}
-                          >
-                            {isGenerating ? (
-                              <>
-                                <Loader2 className="w-4 h-4 animate-spin"/>
-                                <span>生成中...</span>
-                              </>
-                            ) : (
-                              <>
-                                <Wand2 className="w-4 h-4"/>
-                                <span>AI生成字幕</span>
-                              </>
-                            )}
-                          </motion.button>
+                <div className="flex gap-6 justify-center text-xs font-medium text-gray-500">
+                  <div className="flex items-center gap-1.5">
+                    <CheckCircle className="w-3.5 h-3.5 text-black"/>
+                    <span>Smart Recognition</span>
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    <CheckCircle className="w-3.5 h-3.5 text-black"/>
+                    <span>Instant Edit</span>
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    <CheckCircle className="w-3.5 h-3.5 text-black"/>
+                    <span>Export SRT</span>
+                  </div>
+                </div>
+              </div>
+            </motion.div>
+          ) : (
+            // Workspace
+            <motion.div
+              key="workspace"
+              className="grid grid-cols-1 xl:grid-cols-3 gap-4 h-[calc(100vh-8rem)] w-full"
+              initial={{opacity: 0}}
+              animate={{opacity: 1}}
+              transition={{duration: 0.3}}
+            >
+              {/* Left Column: Video Player */}
+              <div className="xl:col-span-2 h-full flex flex-col overflow-hidden">
+                <div className="card-base p-4 h-full flex flex-col">
+                  <div className="flex justify-between items-center mb-2 shrink-0">
+                    <h2 className="text-sm font-semibold text-gray-900 flex items-center gap-2 uppercase tracking-wider">
+                      Preview
+                    </h2>
+                    
+                    {videoUrl && (
+                      <div className="flex items-center gap-4">
+                        <div className="flex items-center gap-2">
+                          <label className="text-xs font-medium text-gray-600 cursor-pointer select-none flex items-center gap-2">
+                            <input
+                              type="checkbox"
+                              checked={enableVocalSeparation}
+                              onChange={(e) => setEnableVocalSeparation(e.target.checked)}
+                              disabled={isGenerating}
+                              className="rounded-sm border-gray-300 text-black focus:ring-black disabled:opacity-50"
+                            />
+                            Vocal Isolation
+                          </label>
                         </div>
-                      )}
-                    </div>
-                    <motion.div
-                      className="rounded-xl overflow-hidden"
-                      initial={{scale: 0.9, opacity: 0}}
-                      animate={{scale: 1, opacity: 1}}
-                      transition={{delay: 0.2}}
-                    >
-                      <VideoPlayer
-                        ref={videoRef}
-                        videoUrl={videoUrl}
-                        onTimeUpdate={handleTimeUpdate}
-                        subtitles={subtitles}
-                      />
-                    </motion.div>
-                  </div>
-                </motion.div>
 
-                {/* 字幕编辑器区域 */}
-                <motion.div
-                  className="xl:col-span-1"
-                  initial={{x: 50, opacity: 0}}
-                  animate={{x: 0, opacity: 1}}
-                  transition={{delay: 0.2}}
-                >
-                  <div className="glass-card p-6 h-full flex flex-col">
-                    <div className="flex justify-between items-center mb-4">
-                      <h2 className="text-2xl font-bold text-white flex items-center space-x-3">
-                        <Edit3 className="w-6 h-6 text-purple-400"/>
-                        <span>字幕编辑器</span>
-                      </h2>
-                      <AnimatePresence>
-                        {subtitles.length > 0 && (
-                          <motion.div
-                            className="text-sm text-gray-400 bg-gray-800/60 px-3 py-1 rounded-full backdrop-blur-sm"
-                            initial={{scale: 0, opacity: 0}}
-                            animate={{scale: 1, opacity: 1}}
-                            exit={{scale: 0, opacity: 0}}
-                          >
-                            {subtitles.length} 条字幕
-                          </motion.div>
-                        )}
-                      </AnimatePresence>
-                    </div>
-
-                    <AnimatePresence mode="wait">
-                      {subtitles.length === 0 ? (
-                        <motion.div
-                          key="empty"
-                          className="text-center py-12"
-                          initial={{opacity: 0, y: 20}}
-                          animate={{opacity: 1, y: 0}}
-                          exit={{opacity: 0, y: -20}}
+                        <button
+                          onClick={handleGenerateSubtitles}
+                          disabled={isGenerating}
+                          className={`btn-primary text-xs flex items-center gap-2 cursor-pointer disabled:cursor-not-allowed ${isGenerating ? 'opacity-75' : ''}`}
                         >
-                          <motion.div
-                            className="w-16 h-16 bg-gray-700/50 rounded-full mx-auto mb-4 flex items-center justify-center backdrop-blur-sm"
-                            animate={{
-                              scale: [1, 1.1, 1],
-                            }}
-                            transition={{
-                              duration: 2,
-                              repeat: Infinity,
-                              ease: "easeInOut"
-                            }}
-                          >
-                            <FileVideo className="w-8 h-8 text-gray-400"/>
-                          </motion.div>
-                          <p className="text-gray-400 mb-2">还没有字幕</p>
-                          <p className="text-sm text-gray-500">上传视频后点击"AI生成字幕"开始</p>
-                        </motion.div>
-                      ) : (
-                        <motion.div
-                          key="editor"
-                          className="flex-1"
-                          initial={{opacity: 0}}
-                          animate={{opacity: 1}}
-                          transition={{delay: 0.3}}
-                        >
-                          <SubtitleEditor
-                            subtitles={subtitles}
-                            onSubtitleChange={handleSubtitleChange}
-                            onSubtitleClick={handleSubtitleClick}
-                            currentTime={currentTime}
-                          />
-                        </motion.div>
-                      )}
-                    </AnimatePresence>
+                          {isGenerating ? (
+                            <>
+                              <Loader2 className="w-3.5 h-3.5 animate-spin"/>
+                              Processing...
+                            </>
+                          ) : (
+                            <>
+                              <Wand2 className="w-3.5 h-3.5"/>
+                              Generate Subtitles
+                            </>
+                          )}
+                        </button>
+                      </div>
+                    )}
                   </div>
-                </motion.div>
-              </motion.div>
-            )}
-          </AnimatePresence>
-        </div>
+                  
+                  <div className="flex-1 bg-transparent rounded-md overflow-hidden relative flex items-center justify-center aspect-video">
+                    <VideoPlayer
+                      ref={videoRef}
+                      videoUrl={videoUrl}
+                      onTimeUpdate={handleTimeUpdate}
+                      subtitles={subtitles}
+                      styles={assStyles}
+                      customFont={selectedFont || undefined}
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* Right Column: Editor */}
+              <div className="xl:col-span-1 h-full flex flex-col overflow-hidden">
+                <div className="card-base p-4 h-full flex flex-col overflow-hidden">
+                  <div className="flex justify-between items-center mb-2 pb-2 border-b border-gray-100 shrink-0">
+                    <h2 className="text-sm font-semibold text-gray-900 uppercase tracking-wider">
+                      Editor
+                    </h2>
+                    <span className="text-[10px] font-bold px-2 py-0.5 bg-gray-100 text-gray-600 rounded-sm">
+                      {subtitles.length} LINES
+                    </span>
+                  </div>
+
+                  {subtitles.length === 0 ? (
+                    <div className="flex-1 flex flex-col items-center justify-center text-gray-400 p-8 text-center border border-dashed border-gray-200 rounded-md bg-gray-50/30">
+                      <FileVideo className="w-8 h-8 mb-3 opacity-20 text-black"/>
+                      <p className="text-xs font-medium">No subtitles yet</p>
+                    </div>
+                  ) : (
+                    <div className="flex-1 overflow-hidden relative flex flex-col">
+                       <SubtitleEditor
+                          subtitles={subtitles}
+                          onSubtitleChange={handleSubtitleChange}
+                          onSubtitleClick={handleSubtitleClick}
+                          onBurn={handleBurn}
+                          isBurning={isBurning}
+                          onFontSelect={setSelectedFont}
+                          currentTime={currentTime}
+                          styles={assStyles}
+                          onStylesChange={setAssStyles}
+                        />
+                    </div>
+                  )}
+                </div>
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
       </main>
     </div>
   );

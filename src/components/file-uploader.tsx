@@ -2,7 +2,7 @@
 
 import { ChangeEvent, useState } from 'react';
 import { motion } from 'framer-motion';
-import { Upload, FileVideo } from 'lucide-react';
+import { Upload, FileUp } from 'lucide-react';
 
 interface FileUploaderProps {
   onFileSelect: (file: File) => void;
@@ -51,34 +51,34 @@ export default function FileUploader({ onFileSelect }: FileUploaderProps) {
       <motion.label 
         htmlFor="video-upload" 
         className={`
-          cursor-pointer inline-flex items-center space-x-2 px-6 py-3 rounded-lg font-semibold transition-all duration-200
+          cursor-pointer inline-flex items-center gap-2 px-4 py-2 rounded-md font-medium text-xs transition-all duration-200 border
           ${isDragOver 
-            ? 'bg-blue-500 text-white scale-105' 
-            : 'bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 text-white'
+            ? 'bg-blue-50 border-blue-500 text-blue-700' 
+            : 'bg-black text-white border-transparent hover:bg-gray-800'
           }
-          shadow-lg hover:shadow-xl
         `}
         onDrop={handleDrop}
         onDragOver={handleDragOver}
         onDragLeave={handleDragLeave}
-        whileHover={{ scale: 1.05 }}
-        whileTap={{ scale: 0.95 }}
+        whileHover={{ scale: 1.01 }}
+        whileTap={{ scale: 0.99 }}
       >
-        <Upload className="w-4 h-4" />
-        <span>上传视频</span>
+        <Upload className="w-3.5 h-3.5" />
+        <span>Select Video</span>
       </motion.label>
       
-      {/* 拖拽提示 */}
+      {/* Drag Overlay */}
       {isDragOver && (
         <motion.div
-          className="absolute -inset-2 border-2 border-dashed border-blue-400 rounded-lg bg-blue-400/10 flex items-center justify-center"
-          initial={{ opacity: 0, scale: 0.9 }}
-          animate={{ opacity: 1, scale: 1 }}
-          exit={{ opacity: 0, scale: 0.9 }}
+          className="fixed inset-0 z-[100] bg-blue-500/10 backdrop-blur-sm border-2 border-blue-500 border-dashed m-4 rounded-md flex items-center justify-center"
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          style={{ pointerEvents: 'none' }}
         >
-          <div className="flex flex-col items-center text-blue-400">
-            <FileVideo className="w-8 h-8 mb-2" />
-            <span className="text-sm font-medium">松开以上传</span>
+          <div className="bg-white p-8 rounded-md border border-gray-100 flex flex-col items-center text-blue-600">
+            <FileUp className="w-10 h-10 mb-4" />
+            <span className="text-lg font-bold">Drop video here</span>
           </div>
         </motion.div>
       )}

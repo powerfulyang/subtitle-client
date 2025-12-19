@@ -1,5 +1,6 @@
 import { FFmpeg } from '@ffmpeg/ffmpeg';
 import { fetchFile, toBlobURL } from '@ffmpeg/util';
+import { AssStyles, toAssColor } from './ass-utils';
 
 let ffmpeg: FFmpeg | null;
 
@@ -26,6 +27,76 @@ export async function getFFmpeg() {
   })
 
   return ffmpeg;
+}
+
+export async function burnSubtitles(
+  videoFile: File,
+  srtContent: string,
+  onProgress?: (progress: number) => void,
+  customFont?: { blob: Blob; name: string; fileName: string },
+  styles?: AssStyles
+) {
+  const ffmpeg = await getFFmpeg();
+
+  // Progress handling
+  const progressHandler = ({ progress }: { progress: number }) => {
+    if (onProgress) onProgress(Math.round(progress * 100));
+  };
+  ffmpeg.on('progress', progressHandler);
+
+  try {
+    const inputName = 'input.mp4';
+    const outputName = 'output.mp4';
+    const subName = 'subtitles.srt';
+    // Use custom font filename or default
+    const fontFileName = customFont ? customFont.fileName : 'Roboto-Regular.ttf';
+    
+    // Construct force_style string
+    const styleParts = [];
+    if (styles) {
+        styleParts.push(`FontName=${styles.fontName}`);
+        styleParts.push(`FontSize=${styles.fontSize}`);
+        styleParts.push(`PrimaryColour=${toAssColor(styles.primaryColor)}`);
+        styleParts.push(`OutlineColour=${toAssColor(styles.outlineColor)}`);
+        styleParts.push(`Alignment=${styles.alignment}`);
+        styleParts.push(`MarginV=${styles.marginV}`);
+    } else {
+        // Fallback default
+        styleParts.push(`FontName=${customFont ? customFont.name : 'Roboto-Regular'}`);
+    }
+    const forceStyle = styleParts.join(',');
+
+    // 1. Write video and subtitles
+    await ffmpeg.writeFile(inputName, await fetchFile(videoFile));
+    await ffmpeg.writeFile(subName, srtContent);
+
+        // 2. Write font
+        if (customFont) {
+            await ffmpeg.writeFile(fontFileName, await fetchFile(customFont.blob));
+        } else {
+            // Download default font
+            // Using a more reliable CDN for Roboto font
+            const fontUrl = 'https://raw.githubusercontent.com/google/fonts/main/apache/roboto/Roboto-Regular.ttf';
+            await ffmpeg.writeFile(fontFileName, await fetchFile(fontUrl));
+        }
+    // 3. Execute burn command
+    await ffmpeg.exec([
+      '-i', inputName,
+      '-vf', `subtitles=${subName}:fontsdir=/:force_style='${forceStyle}'`,
+      '-c:a', 'copy', // Copy audio stream (fast)
+      '-preset', 'ultrafast', // Fast encoding for WASM
+      outputName
+    ]);
+
+    // 4. Read output
+    const data = await ffmpeg.readFile(outputName);
+    return new Blob([data as unknown as ArrayBuffer], { type: 'video/mp4' });
+
+  } finally {
+    ffmpeg.off('progress', progressHandler);
+    // Cleanup files could be done here:
+    // try { await ffmpeg.deleteFile('input.mp4'); } catch(e) {}
+  }
 }
 
 export async function extractAudio(videoFile: File) {

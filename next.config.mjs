@@ -30,11 +30,49 @@ const nextConfig = {
             from: path.join(__dirname, 'node_modules', '@ffmpeg', 'core-mt', 'dist', 'umd', 'ffmpeg-core.worker.js'),
             to: path.join(__dirname, 'public', 'ffmpeg'),
           },
+          // Copy JASSUB worker and wasm files specifically
+          {
+            from: path.join(__dirname, 'node_modules', 'jassub', 'dist', 'jassub-worker.js'),
+            to: path.join(__dirname, 'public', 'jassub', 'jassub-worker.js'),
+          },
+          {
+            from: path.join(__dirname, 'node_modules', 'jassub', 'dist', 'jassub-worker.wasm'),
+            to: path.join(__dirname, 'public', 'jassub', 'jassub-worker.wasm'),
+          },
+          {
+            from: path.join(__dirname, 'node_modules', 'jassub', 'dist', 'jassub-worker.wasm.js'),
+            to: path.join(__dirname, 'public', 'jassub', 'jassub-worker.wasm.js'),
+          },
+          {
+            from: path.join(__dirname, 'node_modules', 'jassub', 'dist', 'jassub-worker-modern.wasm'),
+            to: path.join(__dirname, 'public', 'jassub', 'jassub-worker-modern.wasm'),
+          },
+          {
+            from: path.join(__dirname, 'node_modules', 'jassub', 'dist', 'default.woff2'),
+            to: path.join(__dirname, 'public', 'jassub', 'default.woff2'),
+          },
         ],
       })
     );
 
     return config;
+  },
+  async headers() {
+    return [
+      {
+        source: '/(.*)',
+        headers: [
+          {
+            key: 'Cross-Origin-Opener-Policy',
+            value: 'same-origin',
+          },
+          {
+            key: 'Cross-Origin-Embedder-Policy',
+            value: 'require-corp',
+          },
+        ],
+      },
+    ];
   },
 };
 

@@ -1,19 +1,37 @@
 'use client';
 
-import {motion, AnimatePresence} from 'framer-motion';
-import {Clock, Edit2, Play, Download, FileText} from 'lucide-react';
-import {Subtitle} from '@/lib/srt-parser';
-import {stringifySrt} from '@/lib/srt-parser';
-import {useEffect, useMemo, useState} from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
+import { Clock, Download, Flame, Type, Settings, Upload, Palette, MoveVertical, LayoutTemplate } from 'lucide-react';
+import { Subtitle, stringifySrt } from '@/lib/srt-parser';
+import { AssStyles, DEFAULT_ASS_STYLES } from '@/lib/ass-utils';
+import { useEffect, useMemo, useState } from 'react';
+
+interface FontData {
+  family: string;
+  fullName: string;
+  postscriptName: string;
+  blob: () => Promise<Blob>;
+}
+
+declare global {
+  interface Window {
+    queryLocalFonts?: () => Promise<FontData[]>;
+  }
+}
 
 interface SubtitleEditorProps {
   subtitles: Subtitle[];
   onSubtitleChange: (index: number, text: string) => void;
   onSubtitleClick: (startTime: string) => void;
+  onBurn?: () => void;
+  onFontSelect?: (font: { blob: Blob; name: string; fileName: string } | null) => void;
+  styles?: AssStyles;
+  onStylesChange?: (styles: AssStyles) => void;
+  isBurning?: boolean;
   currentTime?: number;
 }
 
-// 将SRT时间格式转换为秒数
+// Convert SRT time string to seconds
 const srtTimeToSeconds = (time: string): number => {
   const [hours, minutes, seconds] = time.split(':');
   const [secs, millis] = seconds.split(',');
@@ -21,16 +39,87 @@ const srtTimeToSeconds = (time: string): number => {
 };
 
 export default function SubtitleEditor({
-                                         subtitles,
-                                         onSubtitleChange,
-                                         onSubtitleClick,
-                                         currentTime = 0
-                                       }: SubtitleEditorProps) {
+  subtitles,
+  onSubtitleChange,
+  onSubtitleClick,
+  onBurn,
+  onFontSelect,
+  styles = DEFAULT_ASS_STYLES,
+  onStylesChange,
+  isBurning = false,
+  currentTime = 0
+}: SubtitleEditorProps) {
   const [isExporting, setIsExporting] = useState(false);
+  const [showSettings, setShowSettings] = useState(false);
+  const [systemFonts, setSystemFonts] = useState<FontData[]>([]);
+  const [isLoadingFonts, setIsLoadingFonts] = useState(false);
 
-  // 使用 useMemo 缓存 activeSubtitleIndex 的计算
+  // Check if API is supported
+  const isLocalFontsSupported = typeof window !== 'undefined' && 'queryLocalFonts' in window;
+
+  const updateStyle = (key: keyof AssStyles, value: any) => {
+    if (onStylesChange) {
+      onStylesChange({ ...styles, [key]: value });
+    }
+  };
+
+  const loadSystemFonts = async () => {
+    if (!window.queryLocalFonts) return;
+    setIsLoadingFonts(true);
+    try {
+      const fonts = await window.queryLocalFonts();
+      const uniqueFonts = fonts.filter((font, index, self) =>
+        index === self.findIndex((t) => t.family === font.family)
+      );
+      setSystemFonts(uniqueFonts);
+    } catch (err) {
+      console.error('Error querying fonts:', err);
+    } finally {
+      setIsLoadingFonts(false);
+    }
+  };
+
+  const handleSystemFontSelect = async (fontFamily: string) => {
+    const font = systemFonts.find(f => f.family === fontFamily);
+    if (!font) return;
+
+    try {
+      const blob = await font.blob();
+      if (onFontSelect) {
+        onFontSelect({
+          blob,
+          name: font.family,
+          fileName: `${font.postscriptName}.ttf`
+        });
+      }
+      updateStyle('fontName', font.family);
+    } catch (err) {
+      console.error('Error reading font blob:', err);
+      alert('Failed to load selected font.');
+    }
+  };
+
+  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files && e.target.files[0]) {
+      const file = e.target.files[0];
+      if (!file.name.match(/\.(ttf|otf|woff2?)$/i)) {
+        alert('Please upload a valid font file (.ttf, .otf, .woff)');
+        return;
+      }
+      const name = file.name.replace(/\.[^/.]+$/, "");
+      if (onFontSelect) {
+        onFontSelect({
+          blob: file,
+          name: name,
+          fileName: file.name
+        });
+      }
+      updateStyle('fontName', name);
+    }
+  };
+
+  // Binary search for active subtitle index
   const activeSubtitleIndex = useMemo(() => {
-    // 使用二分查找优化性能
     if (subtitles.length === 0) return -1;
 
     let left = 0;
@@ -54,65 +143,52 @@ export default function SubtitleEditor({
   }, [currentTime, subtitles]);
 
   useEffect(() => {
-    const activeElement = document.getElementById(`subtitle-editor-item-${activeSubtitleIndex}`);
-    if (activeElement) {
-      activeElement.scrollIntoView({
-        behavior: 'smooth',
-        block: 'center',
-        inline: 'nearest'
-      });
-    }
+    // Only scroll if the active subtitle is not visible or just to keep it centered
+    // We use a slight delay to ensure render is complete
+    const timeoutId = setTimeout(() => {
+      const activeElement = document.getElementById(`subtitle-editor-item-${activeSubtitleIndex}`);
+      if (activeElement) {
+        activeElement.scrollIntoView({
+          behavior: 'smooth',
+          block: 'center',
+          inline: 'nearest'
+        });
+      }
+    }, 100);
+    return () => clearTimeout(timeoutId);
   }, [activeSubtitleIndex]);
 
-  // SRT文件导出功能
   const exportSrtFile = async () => {
-    if (subtitles.length === 0) {
-      alert('没有字幕内容可导出');
-      return;
-    }
+    if (subtitles.length === 0) return;
 
     setIsExporting(true);
 
     try {
-      // 使用现有的stringifySrt函数生成SRT内容
       const srtContent = stringifySrt(subtitles);
-
-      // 创建Blob对象
-      const blob = new Blob([srtContent], {
-        type: 'text/plain;charset=utf-8'
-      });
-
-      // 创建下载链接
+      const blob = new Blob([srtContent], { type: 'text/plain;charset=utf-8' });
       const url = URL.createObjectURL(blob);
       const link = document.createElement('a');
       link.href = url;
-
-      // 生成文件名（包含时间戳）
+      
       const timestamp = new Date().toISOString().slice(0, 19).replace(/:/g, '-');
       link.download = `subtitles-${timestamp}.srt`;
 
-      // 触发下载
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
-
-      // 清理URL对象
       URL.revokeObjectURL(url);
-
     } catch (error) {
-      console.error('导出SRT文件失败:', error);
-      alert('导出失败，请重试');
+      console.error('Failed to export SRT:', error);
+      alert('Export failed. Please try again.');
     } finally {
       setIsExporting(false);
     }
   };
 
   return (
-    <>
-      <div
-        className="space-y-3 subtitle-editor-container overflow-y-auto max-h-[calc(100vh-20rem)]"
-      >
-        <AnimatePresence>
+    <div className="flex flex-col h-full">
+      <div className="flex-1 overflow-y-auto pr-2 subtitle-editor-container">
+        <AnimatePresence initial={false}>
           {subtitles.map((sub, index) => {
             const isActive = index === activeSubtitleIndex;
 
@@ -120,106 +196,234 @@ export default function SubtitleEditor({
               <motion.div
                 key={sub.id}
                 id={`subtitle-editor-item-${index}`}
-                initial={{opacity: 0, y: 20}}
-                animate={{opacity: 1, y: 0}}
-                exit={{opacity: 0, y: -20}}
-                transition={{delay: index * 0.05}}
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
                 className={`subtitle-item group ${isActive ? 'active' : ''}`}
                 onClick={() => onSubtitleClick(sub.startTime)}
               >
-                {/* 时间轴头部 */}
-                <div className="flex items-center justify-between mb-3">
-                  <div className="flex items-center space-x-2 text-sm">
-                    <Clock className={`w-4 h-4 ${isActive ? 'text-blue-400' : 'text-gray-400'}`}/>
-                    <span className={`font-mono ${isActive ? 'text-blue-300' : 'text-gray-300'}`}>
-                    {sub.startTime}
-                  </span>
-                    <span className="text-gray-500">→</span>
-                    <span className={`font-mono ${isActive ? 'text-blue-300' : 'text-gray-300'}`}>
-                    {sub.endTime}
-                  </span>
+                {/* Time Header */}
+                <div className="flex items-center justify-between mb-2">
+                  <div className="flex items-center gap-2 text-xs font-medium">
+                    <div className={`flex items-center gap-1 ${isActive ? 'text-blue-600' : 'text-gray-400'}`}>
+                      <Clock className="w-3 h-3" />
+                      <span className="font-mono">{sub.startTime}</span>
+                    </div>
+                    <span className="text-gray-300">→</span>
+                    <span className={`font-mono ${isActive ? 'text-blue-600' : 'text-gray-400'}`}>
+                      {sub.endTime}
+                    </span>
                   </div>
+                  <span className={`text-xs ${isActive ? 'text-blue-500 font-semibold' : 'text-gray-300'}`}>
+                    #{index + 1}
+                  </span>
                 </div>
 
-                {/* 字幕内容编辑器 */}
-                <div className="relative">
-                  <motion.textarea
-                    value={sub.text}
-                    onChange={(e) => {
-                      e.stopPropagation();
-                      onSubtitleChange(index, e.target.value);
-                    }}
-                    onClick={(e) => e.stopPropagation()}
-                    className="subtitle-textarea"
-                    placeholder="输入字幕内容..."
-                    rows={Math.max(2, Math.ceil(sub.text.length / 40))}
-                    style={{
-                      height: 'auto',
-                      minHeight: '80px',
-                      maxHeight: '200px',
-                      resize: 'vertical'
-                    }}
-                    whileFocus={{scale: 1.01}}
-                  />
-                </div>
-
-                {/* 字符统计和状态指示器 */}
-                <div className="flex justify-between items-center mt-2 text-xs">
-                  <div className={`${isActive ? 'text-blue-400' : 'text-gray-500'}`}>
-                    第 {index + 1} 条 {isActive && '• 正在播放'}
-                  </div>
-                  <div className="flex items-center space-x-2">
-                  <span className={isActive ? 'text-blue-400' : 'text-gray-500'}>
-                    {sub.text.length} 字符
-                  </span>
-                    {isActive && (
-                      <motion.div
-                        className="w-2 h-2 bg-blue-400 rounded-full"
-                        animate={{scale: [1, 1.2, 1]}}
-                        transition={{repeat: Infinity, duration: 1.5}}
-                      />
-                    )}
-                  </div>
-                </div>
+                {/* Text Editor */}
+                <textarea
+                  value={sub.text}
+                  onChange={(e) => {
+                    e.stopPropagation();
+                    onSubtitleChange(index, e.target.value);
+                  }}
+                  onClick={(e) => e.stopPropagation()}
+                  className="subtitle-textarea text-sm"
+                  rows={Math.max(2, Math.ceil(sub.text.length / 50))}
+                  style={{ height: 'auto' }}
+                />
               </motion.div>
             );
           })}
         </AnimatePresence>
+      </div>
 
-        {/* 空状态提示 */}
-        {subtitles.length === 0 && (
-          <motion.div
-            className="text-center py-8 text-gray-500"
-            initial={{opacity: 0}}
-            animate={{opacity: 1}}
+      {/* Style Settings & Actions */}
+      <div className="mt-4 pt-4 border-t border-gray-100 flex flex-col gap-3">
+        {/* Settings Toggle */}
+        <div className="flex justify-end">
+          <button 
+            onClick={() => setShowSettings(!showSettings)}
+            className="text-gray-500 hover:text-gray-700 flex items-center gap-1 text-xs cursor-pointer"
           >
-            <div className="text-sm">暂无字幕内容</div>
-          </motion.div>
-        )}
+            <Settings className="w-3 h-3" />
+            {showSettings ? 'Hide Styles' : 'Subtitle Styles'}
+          </button>
+        </div>
+
+        {/* Settings Panel */}
+        <AnimatePresence>
+          {showSettings && (
+            <motion.div
+              initial={{ opacity: 0, y: 5, height: 0 }}
+              animate={{ opacity: 1, y: 0, height: 'auto' }}
+              exit={{ opacity: 0, y: 5, height: 0 }}
+              className="bg-white rounded-md border border-gray-200 p-4 mb-2 overflow-hidden shadow-sm"
+            >
+              <div className="space-y-4">
+                {/* Font Section */}
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between text-xs">
+                    <span className="text-gray-500 uppercase font-bold tracking-tight flex items-center gap-1">
+                      <Type className="w-3 h-3" /> Font Family
+                    </span>
+                    <span className="font-medium text-gray-900 truncate max-w-[120px]">{styles.fontName}</span>
+                  </div>
+                  
+                  <div className="flex gap-2">
+                     {isLocalFontsSupported && (
+                        <div className="flex-1">
+                          {systemFonts.length > 0 ? (
+                            <select 
+                              onChange={(e) => handleSystemFontSelect(e.target.value)}
+                              className="w-full text-xs border border-gray-200 rounded-sm p-1.5 bg-gray-50 outline-none focus:border-black cursor-pointer h-full"
+                              value={systemFonts.find(f => f.family === styles.fontName)?.family || ""}
+                            >
+                              <option value="">System Fonts...</option>
+                              {systemFonts.map((f, i) => (
+                                <option key={`${f.family}-${i}`} value={f.family}>{f.fullName}</option>
+                              ))}
+                            </select>
+                          ) : (
+                            <button
+                              onClick={loadSystemFonts}
+                              disabled={isLoadingFonts}
+                              className="w-full h-full btn-secondary text-[10px] py-1.5 flex items-center justify-center gap-1 uppercase tracking-wide cursor-pointer disabled:cursor-not-allowed"
+                            >
+                              {isLoadingFonts ? 'Loading...' : 'Load System'}
+                            </button>
+                          )}
+                        </div>
+                      )}
+                      
+                      <div className="flex-1 relative">
+                        <input
+                          type="file"
+                          id="font-upload"
+                          className="hidden"
+                          accept=".ttf,.otf,.woff,.woff2"
+                          onChange={handleFileUpload}
+                        />
+                        <label
+                          htmlFor="font-upload"
+                          className="w-full h-full btn-secondary text-[10px] py-1.5 flex items-center justify-center gap-1 cursor-pointer uppercase tracking-wide"
+                        >
+                          <Upload className="w-3 h-3" />
+                          Upload File
+                        </label>
+                      </div>
+                  </div>
+                </div>
+
+                {/* Appearance Grid */}
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-1">
+                    <label className="text-[10px] text-gray-500 uppercase font-bold tracking-tight">Size</label>
+                    <input 
+                      type="number" 
+                      value={styles.fontSize}
+                      onChange={(e) => updateStyle('fontSize', parseInt(e.target.value))}
+                      className="w-full text-xs border border-gray-200 rounded-sm p-1.5 bg-gray-50 outline-none focus:border-black"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-[10px] text-gray-500 uppercase font-bold tracking-tight">V-Margin</label>
+                    <input 
+                      type="number" 
+                      value={styles.marginV}
+                      onChange={(e) => updateStyle('marginV', parseInt(e.target.value))}
+                      className="w-full text-xs border border-gray-200 rounded-sm p-1.5 bg-gray-50 outline-none focus:border-black"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-[10px] text-gray-500 uppercase font-bold tracking-tight flex items-center gap-1">
+                      <Palette className="w-3 h-3" /> Color
+                    </label>
+                    <div className="flex items-center gap-2">
+                       <input 
+                        type="color" 
+                        value={styles.primaryColor}
+                        onChange={(e) => updateStyle('primaryColor', e.target.value)}
+                        className="w-8 h-6 p-0 border-0 rounded-sm cursor-pointer"
+                      />
+                      <span className="text-xs text-gray-400">{styles.primaryColor}</span>
+                    </div>
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-[10px] text-gray-500 uppercase font-bold tracking-tight">Outline</label>
+                    <div className="flex items-center gap-2">
+                       <input 
+                        type="color" 
+                        value={styles.outlineColor}
+                        onChange={(e) => updateStyle('outlineColor', e.target.value)}
+                        className="w-8 h-6 p-0 border-0 rounded-sm cursor-pointer"
+                      />
+                      <span className="text-xs text-gray-400">{styles.outlineColor}</span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Alignment */}
+                <div className="space-y-2">
+                  <label className="text-[10px] text-gray-500 uppercase font-bold tracking-tight flex items-center gap-1">
+                    <LayoutTemplate className="w-3 h-3" /> Alignment
+                  </label>
+                  <div className="flex gap-2">
+                    {[1, 2, 3].map(align => (
+                       <button
+                        key={align}
+                        onClick={() => updateStyle('alignment', align)}
+                        className={`flex-1 py-1.5 rounded-sm text-xs font-medium border transition-colors
+                          ${styles.alignment === align 
+                            ? 'bg-black text-white border-black' 
+                            : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'
+                          }
+                        `}
+                       >
+                         {align === 1 ? 'Left' : align === 2 ? 'Center' : 'Right'}
+                       </button>
+                    ))}
+                  </div>
+                </div>
+
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+        <div className="flex gap-2">
+          {onBurn && (
+            <button
+              onClick={onBurn}
+              disabled={isBurning || subtitles.length === 0}
+              className={`
+              flex-1 flex items-center justify-center gap-2 py-2.5 rounded-md font-bold text-[11px] uppercase tracking-widest transition-all border
+              ${subtitles.length === 0 || isBurning
+                ? 'bg-gray-50 text-gray-300 border-gray-100 cursor-not-allowed'
+                : 'bg-orange-500 text-white border-orange-600 hover:bg-orange-600 cursor-pointer'
+              }
+            `}
+            >
+              <Flame className={`w-3.5 h-3.5 ${isBurning ? 'animate-pulse' : ''}`}/>
+              {isBurning ? 'Burning...' : 'Burn Video'}
+            </button>
+          )}
+          
+          <button
+            onClick={exportSrtFile}
+            disabled={isExporting || subtitles.length === 0}
+            className={`
+              flex-1 flex items-center justify-center gap-2 py-2.5 rounded-md font-bold text-[11px] uppercase tracking-widest transition-all border
+              ${subtitles.length === 0
+                ? 'bg-gray-50 text-gray-300 border-gray-100 cursor-not-allowed'
+                : 'bg-black text-white border-black hover:bg-gray-900 cursor-pointer'
+              }
+            `}
+          >
+            <Download className={`w-3.5 h-3.5 ${isExporting ? 'animate-bounce' : ''}`}/>
+            {isExporting ? 'Exporting...' : 'Export SRT'}
+          </button>
+        </div>
       </div>
-      {/* 导出按钮区域 */}
-      <div className="flex justify-end items-center p-2 mt-2 bg-gray-800/50 rounded-lg">
-        <motion.button
-          onClick={exportSrtFile}
-          disabled={isExporting || subtitles.length === 0}
-          className={`
-            flex items-center space-x-2 px-4 py-2 rounded-md text-xs font-medium
-            transition-all duration-200 ease-in-out cursor-pointer
-            ${subtitles.length === 0
-            ? 'bg-gray-700 text-gray-500 cursor-not-allowed'
-            : 'bg-blue-600 hover:bg-blue-700 text-white hover:shadow-lg'
-          }
-            ${isExporting ? 'opacity-75 cursor-wait' : ''}
-          `}
-          whileHover={subtitles.length > 0 ? {scale: 1.02} : {}}
-          whileTap={subtitles.length > 0 ? {scale: 0.98} : {}}
-        >
-          <Download className={`w-4 h-4 ${isExporting ? 'animate-bounce' : ''}`}/>
-          <span>
-            {isExporting ? '导出中...' : '导出 SRT'}
-          </span>
-        </motion.button>
-      </div>
-    </>
+    </div>
   );
 }
+      
