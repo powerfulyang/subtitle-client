@@ -6,6 +6,11 @@ import { MathRichTextEditor } from '@/components/math-rich-text-editor'
 import { findActiveSubtitleIndex, srtTimeToSeconds } from '@/lib/srt'
 
 const { Text } = Typography
+const SCROLL_PADDING = 32
+
+function clamp(value: number, min: number, max: number) {
+  return Math.min(Math.max(value, min), max)
+}
 
 interface SubtitleEditorProps {
   subtitles: Subtitle[]
@@ -34,14 +39,32 @@ export function SubtitleEditor({
   useEffect(() => {
     if (activeIndex < 0)
       return
-    const node = containerRef.current?.querySelector(`[data-index="${activeIndex}"]`)
-    if (node instanceof HTMLElement) {
-      node.scrollIntoView({ block: 'center', behavior: 'smooth' })
-    }
+
+    const container = containerRef.current
+    const node = container?.querySelector(`[data-index="${activeIndex}"]`)
+    if (!container || !(node instanceof HTMLElement))
+      return
+
+    const containerRect = container.getBoundingClientRect()
+    const nodeRect = node.getBoundingClientRect()
+    const visibleTop = containerRect.top + SCROLL_PADDING
+    const visibleBottom = containerRect.bottom - SCROLL_PADDING
+
+    if (nodeRect.top >= visibleTop && nodeRect.bottom <= visibleBottom)
+      return
+
+    const nodeTop = nodeRect.top - containerRect.top + container.scrollTop
+    const targetTop = nodeTop - (container.clientHeight - node.offsetHeight) / 2
+    const maxTop = Math.max(container.scrollHeight - container.clientHeight, 0)
+
+    container.scrollTo({
+      top: clamp(targetTop, 0, maxTop),
+      behavior: 'smooth',
+    })
   }, [activeIndex])
 
   return (
-    <div ref={containerRef} className="custom-scrollbar h-full flex-1 min-h-0 overflow-y-auto pr-1">
+    <div ref={containerRef} className="subtitle-editor-list custom-scrollbar">
       <Flex vertical gap={12}>
         {subtitles.map((subtitle, index) => {
           const active = index === activeIndex

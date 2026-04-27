@@ -1,12 +1,15 @@
 import type { VideoStageRef } from '@/components/video-stage'
 import type { Subtitle } from '@/lib/srt'
+import { CloudUploadOutlined, PlayCircleOutlined } from '@ant-design/icons'
 import { keepPreviousData, useQuery } from '@tanstack/react-query'
 import {
   App as AntdApp,
   Button,
+  Flex,
   Popover,
   Progress,
   Typography,
+  Upload,
 } from 'antd'
 import { AnimatePresence, motion } from 'framer-motion'
 import {
@@ -30,7 +33,6 @@ import { buildCharTimingsFromWords, mergeSubtitleWithNext, parseSrt, secondsToSr
 import { computeBlobHash, downloadBlob, fileNameBase } from '@/lib/utils'
 import { useEditorStore } from '@/store/editor-store'
 
-const MediaDropzone = lazy(() => import('@/components/media-dropzone').then(m => ({ default: m.MediaDropzone })))
 const StylePanel = lazy(() => import('@/components/style-panel').then(m => ({ default: m.StylePanel })))
 const SubtitleEditor = lazy(() => import('@/components/subtitle-editor').then(m => ({ default: m.SubtitleEditor })))
 const SubtitleTimeline = lazy(() => import('@/components/subtitle-timeline').then(m => ({ default: m.SubtitleTimeline })))
@@ -347,6 +349,11 @@ export function App() {
     input.click()
   }, [handleImportSrt])
 
+  const handleUploadMediaBeforeUpload = useCallback((file: File) => {
+    handleMediaSelect(file)
+    return false
+  }, [handleMediaSelect])
+
   const handleLoadDemo = useCallback(async () => {
     try {
       const demoFile = await fetchDemoFile()
@@ -455,7 +462,7 @@ export function App() {
               >
                 <div className="glass-panel landing-card">
                   <div className="landing-grid">
-                    <div>
+                    <div className="landing-copy">
                       <span className="hero-eyebrow">
                         <Sparkles size={14} />
                         字幕编辑工作台
@@ -468,6 +475,22 @@ export function App() {
                         导入视频、生成字幕、直接在时间轴上微调，并在同一个工作台里处理公式文本与硬字幕导出。
                       </p>
 
+                      <div className="formula-guide">
+                        <div className="formula-guide-copy">
+                          <span>公式字幕示例</span>
+                          <p>
+                            在字幕文本里输入
+                            {' '}
+                            <code>$E=mc^2$</code>
+                            ，预览和导出会按数学公式显示。
+                          </p>
+                        </div>
+                        <div className="formula-guide-preview" aria-label="公式字幕显示示例">
+                          E = mc
+                          <sup>2</sup>
+                        </div>
+                      </div>
+
                       <div className="hero-chip-row">
                         <span className="hero-chip">单轨时间轴剪辑</span>
                         <span className="hero-chip">TipTap 文本编辑</span>
@@ -475,40 +498,31 @@ export function App() {
                         <span className="hero-chip">ASS 实时预览</span>
                       </div>
 
-                      <div className="landing-actions">
-                        <Button size="large" type="primary" onClick={handleLoadDemo}>
+                      <Flex gap="middle" wrap className="pt-6!">
+                        <Button
+                          type="link"
+                          size="large"
+                          icon={<PlayCircleOutlined />}
+                          onClick={handleLoadDemo}
+                        >
                           体验演示素材
                         </Button>
-                      </div>
+                        <Upload
+                          accept="video/*"
+                          showUploadList={false}
+                          beforeUpload={handleUploadMediaBeforeUpload}
+                        >
+                          <Button
+                            size="large"
+                            type="primary"
+                            icon={<CloudUploadOutlined />}
+                          >
+                            自定义上传
+                          </Button>
+                        </Upload>
+                      </Flex>
                     </div>
 
-                    <div className="landing-side-stack">
-                      <div className="landing-preview-card">
-                        <div className="landing-preview-screen">
-                          <div className="landing-preview-subtitle">
-                            $E = mc^2$
-                            <span>时间轴 + 公式字幕</span>
-                          </div>
-                        </div>
-                        <div className="landing-preview-meta">
-                          <span>时间轴</span>
-                          <span>mathfield</span>
-                        </div>
-                      </div>
-
-                      <div className="landing-upload-card">
-                        <div className="landing-upload-copy">
-                          <span className="panel-kicker">Upload</span>
-                          <h3 className="landing-upload-title">上传视频开始编辑</h3>
-                          <p className="landing-upload-text">
-                            支持浏览器内直接预览、生成字幕并继续导出硬字幕视频。
-                          </p>
-                        </div>
-                        <Suspense fallback={<div className="h-40 flex items-center justify-center bg-slate-50/50 rounded-xl border-2 border-dashed border-slate-200"><Loader2 className="animate-spin text-slate-300" /></div>}>
-                          <MediaDropzone onSelect={handleMediaSelect} />
-                        </Suspense>
-                      </div>
-                    </div>
                   </div>
                 </div>
               </motion.div>
@@ -563,7 +577,7 @@ export function App() {
                       onClick={() => void handleBurn()}
                       disabled={subtitles.length === 0 || isBurning}
                     >
-                      硬压导出
+                      烧录字幕
                     </Button>
                     <Button
                       size="middle"
@@ -635,6 +649,7 @@ export function App() {
 
                     <Suspense fallback={<div className="h-32" />}>
                       <SubtitleTimeline
+                        mediaUrl={media.url}
                         subtitles={subtitles}
                         currentTime={currentTime}
                         duration={videoDuration}
@@ -664,11 +679,6 @@ export function App() {
                           <kbd className="tip-kbd">Ctrl</kbd>
                           <kbd className="tip-kbd">Enter</kbd>
                           <span>在光标处拆分</span>
-                        </div>
-                        <div className="tip-item">
-                          <kbd className="tip-kbd">←</kbd>
-                          <kbd className="tip-kbd">→</kbd>
-                          <span>穿梭公式与文本</span>
                         </div>
                       </div>
                     </div>
